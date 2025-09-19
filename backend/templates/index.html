@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bookkeeping Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        .tab-pane {
+            padding: 20px;
+        }
+        .visualization {
+            margin: 20px 0;
+            height: 400px;
+        }
+        table {
+            width: 100%;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container">
+            <span class="navbar-brand">Bookkeeping Dashboard</span>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <ul class="nav nav-tabs" id="myTab">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#bank-statements">Bank Statements</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#receipts">Receipts</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#invoices">Invoices</a>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <div class="tab-pane active" id="bank-statements">
+                <h3>Bank Statements</h3>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div id="monthly-summary" class="visualization"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <div id="balance-trends" class="visualization"></div>
+                    </div>
+                </div>
+                
+                <div class="accordion mt-4" id="statementsAccordion">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="tab-pane" id="receipts">
+                <h3>Receipts</h3>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label">Merchant</label>
+                                <input type="text" id="filter-merchant" class="form-control" placeholder="e.g., Starbucks">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Start Date</label>
+                                <input type="date" id="filter-start-date" class="form-control">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">End Date</label>
+                                <input type="date" id="filter-end-date" class="form-control">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Min Total</label>
+                                <input type="number" step="0.01" id="filter-min-total" class="form-control" placeholder="0.00">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Max Total</label>
+                                <input type="number" step="0.01" id="filter-max-total" class="form-control" placeholder="">
+                            </div>
+                            <div class="col-md-1 d-grid">
+                                <button id="apply-receipt-filters" class="btn btn-primary">Apply</button>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-end">
+                            <button id="reset-receipt-filters" class="btn btn-outline-secondary btn-sm">Reset Filters</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="receipt-viz" class="visualization"></div>
+
+                <h5 class="mt-3">Merchants Summary</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm" id="receipts-grouped-table">
+                        <thead>
+                            <tr>
+                                <th>Merchant</th>
+                                <th class="text-end">Receipts</th>
+                                <th class="text-end">Total</th>
+                                <th class="text-end">Tax</th>
+                                <th class="text-end">Average</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div class="table-responsive">
+                    <table class="table" id="receipts-table">
+                        <thead>
+                            <tr>
+                                <th>Merchant</th>
+                                <th>Date</th>
+                                <th>Total</th>
+                                <th>Tax</th>
+                                <th>Items</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="tab-pane" id="invoices">
+                <h3>Invoices</h3>
+                <div id="invoice-viz" class="visualization"></div>
+                <div class="table-responsive">
+                    <table class="table" id="invoices-table">
+                        <thead>
+                            <tr>
+                                <th>Vendor</th>
+                                <th>Invoice ID</th>
+                                <th>Date</th>
+                                <th>Due Date</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Load data when tabs are clicked
+        $(document).ready(function() {
+            // Load bank statements initially
+            loadBankStatements();
+
+            // Set default receipt filters to last 365 days if empty
+            const today = new Date();
+            const lastYear = new Date();
+            lastYear.setFullYear(today.getFullYear() - 1);
+            const fmt = (d) => d.toISOString().slice(0,10);
+            if (!$('#filter-start-date').val()) $('#filter-start-date').val(fmt(lastYear));
+            if (!$('#filter-end-date').val()) $('#filter-end-date').val(fmt(today));
+
+            // Load data when tabs are clicked
+            $('a[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
+                const target = $(e.target).attr("href");
+                if (target === '#bank-statements') {
+                    loadBankStatements();
+                } else if (target === '#receipts') {
+                    loadReceipts();
+                } else if (target === '#invoices') {
+                    loadInvoices();
+                }
+            });
+        });
+
+        function loadBankStatements() {
+            console.log('Loading bank statements...');
+            $.get('/api/bank-statements', function(data) {
+                if (data.error) {
+                    console.error('Error:', data.error);
+                    $('#monthly-summary').html('<div class="alert alert-warning">' + data.error + '</div>');
+                    $('#balance-trends').empty();
+                    $('#statementsAccordion').html('<div class="alert alert-info">No statements available to display.</div>');
+                    return;
+                }
+
+                // Create visualizations
+                Plotly.newPlot('monthly-summary', 
+                    data.visualizations.monthly_summary.data,
+                    data.visualizations.monthly_summary.layout
+                );
+                
+                Plotly.newPlot('balance-trends',
+                    data.visualizations.balance_trends.data,
+                    data.visualizations.balance_trends.layout
+                );
+
+                // Populate statements accordion
+                const accordion = $('#statementsAccordion');
+                accordion.empty();
+                
+                data.statements.forEach((statement, idx) => {
+                    const statementHtml = `
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" 
+                                        data-bs-toggle="collapse" data-bs-target="#statement${idx}">
+                                    ${statement.metadata.bank_name} - 
+                                    ${statement.metadata.statement_period.start_date} to 
+                                    ${statement.metadata.statement_period.end_date}
+                                </button>
+                            </h2>
+                            <div id="statement${idx}" class="accordion-collapse collapse">
+                                <div class="accordion-body">
+                                    <div class="mb-3">
+                                        <strong>Account Holder:</strong> ${statement.metadata.account_holder}
+                                    </div>
+                                    ${statement.accounts.map(account => `
+                                        <div class="card mb-3">
+                                            <div class="card-header">
+                                                Account: ${account.account_number}
+                                                (${account.account_type})
+                                            </div>
+                                            <div class="card-body">
+                                                <p>Beginning Balance: $${account.beginning_balance.toFixed(2)}</p>
+                                                <p>Ending Balance: $${account.ending_balance.toFixed(2)}</p>
+                                                <table class="table table-sm">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Date</th>
+                                                            <th>Description</th>
+                                                            <th>Deposit</th>
+                                                            <th>Withdrawal</th>
+                                                            <th>Balance</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        ${account.transactions.map(trans => `
+                                                            <tr>
+                                                                <td>${trans.date}</td>
+                                                                <td>${trans.description}</td>
+                                                                <td class="text-success">
+                                                                    ${trans.deposit > 0 ? '$' + trans.deposit.toFixed(2) : ''}
+                                                                </td>
+                                                                <td class="text-danger">
+                                                                    ${trans.withdrawal > 0 ? '$' + trans.withdrawal.toFixed(2) : ''}
+                                                                </td>
+                                                                <td>${'$' + trans.running_balance.toFixed(2)}</td>
+                                                            </tr>
+                                                        `).join('')}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    accordion.append(statementHtml);
+                });
+            });
+        }
+
+        function loadReceipts() {
+            const params = {
+                merchant: $('#filter-merchant').val() || '',
+                start_date: $('#filter-start-date').val() || '',
+                end_date: $('#filter-end-date').val() || '',
+                min_total: $('#filter-min-total').val() || '',
+                max_total: $('#filter-max-total').val() || ''
+            };
+
+            $.get('/api/receipts', params, function(data) {
+                if (data.error) {
+                    console.error(data.error);
+                    $('#receipt-viz').html('<div class="alert alert-warning">' + data.error + '</div>');
+                    $('#receipts-grouped-table tbody').html('<tr><td colspan="5" class="text-center">No data</td></tr>');
+                    $('#receipts-table tbody').html('<tr><td colspan="5" class="text-center">No data</td></tr>');
+                    return;
+                }
+
+                // Update visualization
+                Plotly.newPlot('receipt-viz', data.visualization.data, data.visualization.layout);
+
+                // Grouped table
+                $('#receipts-grouped-table tbody').empty();
+                if (data.grouped && data.grouped.length > 0) {
+                    data.grouped.forEach(function(row) {
+                        $('#receipts-grouped-table tbody').append(`
+                            <tr>
+                                <td>${row.merchant_name}</td>
+                                <td class="text-end">${row.receipts_count}</td>
+                                <td class="text-end">$${Number(row.total_amount).toFixed(2)}</td>
+                                <td class="text-end">$${Number(row.total_tax).toFixed(2)}</td>
+                                <td class="text-end">$${Number(row.avg_amount).toFixed(2)}</td>
+                            </tr>
+                        `);
+                    });
+                } else {
+                    $('#receipts-grouped-table tbody').html('<tr><td colspan="5" class="text-center">No data</td></tr>');
+                }
+
+                // Update table
+                $('#receipts-table tbody').empty();
+                if (data.receipts && data.receipts.length > 0) {
+                    data.receipts.forEach(function(receipt) {
+                        const itemsCount = receipt.items ? receipt.items.length : 0;
+                        const total = Number(receipt.total || 0);
+                        const tax = Number(receipt.tax || 0);
+                        $('#receipts-table tbody').append(`
+                            <tr>
+                                <td>${receipt.merchant_name || '-'}</td>
+                                <td>${receipt.transaction_date || '-'}</td>
+                                <td class="text-end">$${total.toFixed(2)}</td>
+                                <td class="text-end">$${tax.toFixed(2)}</td>
+                                <td class="text-end">${itemsCount} items</td>
+                            </tr>
+                        `);
+                    });
+                } else {
+                    $('#receipts-table tbody').html('<tr><td colspan="5" class="text-center">No data</td></tr>');
+                }
+            });
+        }
+
+        // Filter button events
+        $(document).on('click', '#apply-receipt-filters', function() {
+            loadReceipts();
+        });
+        $(document).on('click', '#reset-receipt-filters', function() {
+            $('#filter-merchant').val('');
+            $('#filter-start-date').val('');
+            $('#filter-end-date').val('');
+            $('#filter-min-total').val('');
+            $('#filter-max-total').val('');
+            loadReceipts();
+        });
+
+        function loadInvoices() {
+            $.get('/api/invoices', function(data) {
+                if (data.error) {
+                    console.error(data.error);
+                    return;
+                }
+
+                // Update visualization
+                Plotly.newPlot('invoice-viz', data.visualization.data, data.visualization.layout);
+
+                // Update table
+                $('#invoices-table tbody').empty();
+                data.invoices.forEach(function(invoice) {
+                    $('#invoices-table tbody').append(`
+                        <tr>
+                            <td>${invoice.vendor_name}</td>
+                            <td>${invoice.invoice_id}</td>
+                            <td>${invoice.invoice_date}</td>
+                            <td>${invoice.due_date}</td>
+                            <td>${invoice.invoice_total}</td>
+                        </tr>
+                    `);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
